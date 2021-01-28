@@ -39,15 +39,19 @@ stages:
     - script: |
         sudo apt-get install -y --no-install-recommends \
           jq curl
+
         release="$(Build.SourceBranchName)"
         created_by="$(curl -s https://api.github.com/repos/home-assistant/core/releases/tags/${release} | jq --raw-output '.author.login')"
+
         if [[ "${created_by}" =~ ^(balloob|pvizeli|fabaff|robbiet480|bramkragten|frenck)$ ]]; then
           exit 0
         fi
+
         echo "${created_by} is not allowed to create an release!"
         exit 1
       displayName: 'Check rights'
       condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags'))
+
 - stage: 'Build'
   jobs:
   - job: 'ReleasePython'
@@ -56,9 +60,9 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - task: UsePythonVersion@0
-      displayName: 'Use Python 3.8'
+      displayName: 'Use Python 3.7'
       inputs:
-        versionSpec: '3.8'
+        versionSpec: '3.7'
     - script: pip install twine wheel
       displayName: 'Install tools'
     - script: python setup.py sdist bdist_wheel
@@ -66,6 +70,7 @@ stages:
     - script: |
         export TWINE_USERNAME="$(twineUser)"
         export TWINE_PASSWORD="$(twinePassword)"
+
         twine upload dist/* --skip-existing
       displayName: 'Upload pypi'
   - job: 'ReleaseDocker'
@@ -94,6 +99,7 @@ stages:
       displayName: 'Install Builder'
     - script: |
         set -e
+
         docker run --rm --privileged \
           -v ~/.docker:/root/.docker:rw \
           -v /run/docker.sock:/run/docker.sock:rw \
@@ -151,6 +157,7 @@ stages:
       displayName: 'Install Builder'
     - script: |
         set -e
+
         docker run --rm --privileged \
           -v ~/.docker:/root/.docker \
           -v /run/docker.sock:/run/docker.sock:rw \
@@ -159,6 +166,7 @@ stages:
           --homeassistant-machine "$(homeassistantRelease)=$(buildMachine)" \
           -t /data/machine --docker-hub homeassistant
       displayName: 'Build Machine'
+
 - stage: 'Publish'
   jobs:
   - job: 'ReleaseHassio'
@@ -169,19 +177,25 @@ stages:
     - script: |
         sudo apt-get install -y --no-install-recommends \
           git jq curl
+
         git config --global user.name "Pascal Vizeli"
         git config --global user.email "pvizeli@syshack.ch"
         git config --global credential.helper store
+
         echo "https://$(githubToken):x-oauth-basic@github.com" > $HOME/.git-credentials
       displayName: 'Install requirements'
     - script: |
         set -e
+
         version="$(homeassistantRelease)"
+
         git clone https://github.com/home-assistant/version
         cd version
+
         dev_version="$(jq --raw-output '.homeassistant.default' dev.json)"
         beta_version="$(jq --raw-output '.homeassistant.default' beta.json)"
         stable_version="$(jq --raw-output '.homeassistant.default' stable.json)"
+
         if [[ "$version" =~ d ]]; then
           sed -i "s|$dev_version|$version|g" dev.json
         elif [[ "$version" =~ b ]]; then
@@ -190,6 +204,7 @@ stages:
           sed -i "s|$beta_version|$version|g" beta.json
           sed -i "s|$stable_version|$version|g" stable.json
         fi
+
         git commit -am "Bump Home Assistant $version"
         git push
       displayName: "Update version files"
@@ -204,39 +219,50 @@ stages:
     - script: |
         set -e
         export DOCKER_CLI_EXPERIMENTAL=enabled
+
         function create_manifest() {
           local tag_l=$1
           local tag_r=$2
+
           docker manifest create homeassistant/home-assistant:${tag_l} \
             homeassistant/amd64-homeassistant:${tag_r} \
             homeassistant/i386-homeassistant:${tag_r} \
             homeassistant/armhf-homeassistant:${tag_r} \
             homeassistant/armv7-homeassistant:${tag_r} \
             homeassistant/aarch64-homeassistant:${tag_r}
+
           docker manifest annotate homeassistant/home-assistant:${tag_l} \
             homeassistant/amd64-homeassistant:${tag_r} \
             --os linux --arch amd64
+
           docker manifest annotate homeassistant/home-assistant:${tag_l} \
             homeassistant/i386-homeassistant:${tag_r} \
             --os linux --arch 386
+
           docker manifest annotate homeassistant/home-assistant:${tag_l} \
             homeassistant/armhf-homeassistant:${tag_r} \
             --os linux --arch arm --variant=v6
+
           docker manifest annotate homeassistant/home-assistant:${tag_l} \
             homeassistant/armv7-homeassistant:${tag_r} \
             --os linux --arch arm --variant=v7
+
           docker manifest annotate homeassistant/home-assistant:${tag_l} \
             homeassistant/aarch64-homeassistant:${tag_r} \
             --os linux --arch arm64 --variant=v8
+
           docker manifest push --purge homeassistant/home-assistant:${tag_l}
         }
+
         docker pull homeassistant/amd64-homeassistant:$(homeassistantRelease)
         docker pull homeassistant/i386-homeassistant:$(homeassistantRelease)
         docker pull homeassistant/armhf-homeassistant:$(homeassistantRelease)
         docker pull homeassistant/armv7-homeassistant:$(homeassistantRelease)
         docker pull homeassistant/aarch64-homeassistant:$(homeassistantRelease)
+
         # Create version tag
         create_manifest "$(homeassistantRelease)" "$(homeassistantRelease)"
+
         # Create general tags
         if [[ "$(homeassistantRelease)" =~ d ]]; then
           create_manifest "dev" "$(homeassistantRelease)"
@@ -249,7 +275,9 @@ stages:
           create_manifest "beta" "$(homeassistantRelease)"
           create_manifest "rc" "$(homeassistantRelease)"
         fi
+
       displayName: 'Create Meta-Image'
+
 - stage: 'Addidional'
   jobs:
   - job: 'Updater'
@@ -261,7 +289,9 @@ stages:
     - template: templates/azp-step-ha-version.yaml@azure
     - script: |
         set -e
+
         export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
         curl -o google-cloud-sdk.tar.gz https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz
         tar -C . -xvf google-cloud-sdk.tar.gz
         rm -f google-cloud-sdk.tar.gz
@@ -270,7 +300,9 @@ stages:
       condition: eq(variables['homeassistantReleaseStable'], 'true')
     - script: |
         set -e
+
         export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
         echo "$(gcloudAnalytic)" > gcloud_auth.json
         ./google-cloud-sdk/bin/gcloud auth activate-service-account --key-file gcloud_auth.json
         rm -f gcloud_auth.json
@@ -278,7 +310,9 @@ stages:
       condition: eq(variables['homeassistantReleaseStable'], 'true')
     - script: |
         set -e
+
         export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
         ./google-cloud-sdk/bin/gcloud functions deploy Analytics-Receiver \
           --project home-assistant-analytics \
           --update-env-vars VERSION=$(homeassistantRelease) \
